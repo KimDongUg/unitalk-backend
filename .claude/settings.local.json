@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx jest --coverage --forceExit)",
+      "Bash(pg_isready:*)",
+      "Bash(where:*)",
+      "Bash(findstr:*)",
+      "Bash(sc query:*)",
+      "Bash(docker info:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker compose:*)",
+      "Bash(start \"\" \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
+      "Bash(docker ps:*)",
+      "Bash(npm run migrate:*)",
+      "Bash(npm run seed:*)"
+    ]
+  }
+}
