@@ -13,7 +13,8 @@
       "Bash(start \"\" \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
       "Bash(docker ps:*)",
       "Bash(npm run migrate:*)",
-      "Bash(npm run seed:*)"
+      "Bash(npm run seed:*)",
+      "Bash(node:*)"
     ]
   }
 }

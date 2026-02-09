@@ -1,7 +1,28 @@
+# Dependencies
 node_modules/
+
+# Environment variables (민감 정보)
 .env
+.env.local
+.env.production
+
+# Test coverage
 coverage/
+
+# Logs
 logs/
 *.log
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build
 dist/
+
+# Docker volumes
+pgdata/
