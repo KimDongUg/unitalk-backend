@@ -56,7 +56,10 @@ cp .env.example .env
 |----------|-------------|----------|
 | `PORT` | 서버 포트 (기본: 3000) | No |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | PostgreSQL 접속 정보 | Yes |
-| `REDIS_HOST` / `REDIS_PORT` | Redis 접속 정보 | Yes |
+| `REDIS_HOST` | Redis 호스트 (production 필수, `:6379` 붙이지 말 것) | Yes |
+| `REDIS_PORT` | Redis 포트 (기본: 6379) | No |
+| `REDIS_PASSWORD` | Redis 비밀번호 (ACL 미사용 시 비워둠) | No |
+| `REDIS_TLS` | TLS 사용 여부 (`true` / `false`) | Yes (AWS) |
 | `JWT_SECRET` | JWT 서명 키 | Yes |
 | `GOOGLE_API_KEY` | Google Translate API 키 | No (dev fallback) |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Twilio SMS 설정 | No (dev fallback) |
@@ -152,11 +155,34 @@ node tests/manual-api-test.js
 
 ## Deployment
 
-PM2를 사용한 프로덕션 배포:
+### AWS ElastiCache (Redis) 환경변수 설정
+
+AWS ElastiCache Serverless Redis를 사용하는 경우 반드시 아래 환경변수를 설정해야 합니다.
+
+```bash
+REDIS_HOST=unitalk-redis-xxxx.serverless.apn2.cache.amazonaws.com
+REDIS_PORT=6379
+REDIS_TLS=true
+REDIS_PASSWORD=
+NODE_ENV=production
+```
+
+> - `REDIS_HOST`에는 호스트명만 입력 (`:6379` 포함 금지)
+> - ElastiCache Serverless는 TLS 필수이므로 `REDIS_TLS=true` 반드시 설정
+> - `REDIS_PASSWORD`는 ACL을 사용하지 않으면 비워둡니다
+> - production에서 `REDIS_HOST` 누락 시 서버가 즉시 에러로 종료됩니다
+
+### PM2 배포
 
 ```bash
 npm install -g pm2
 pm2 start ecosystem.config.js --env production
+```
+
+환경변수 변경 후 재시작:
+
+```bash
+pm2 restart all --update-env
 ```
 
 ## License
