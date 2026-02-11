@@ -14,7 +14,7 @@ const Conversation = {
     );
 
     if (result.rows[0]) {
-      return result.rows[0];
+      return { conversation: result.rows[0], isNew: false };
     }
 
     // Create new conversation
@@ -24,7 +24,7 @@ const Conversation = {
        RETURNING *`,
       [first, second]
     );
-    return result.rows[0];
+    return { conversation: result.rows[0], isNew: true };
   },
 
   async findById(id) {

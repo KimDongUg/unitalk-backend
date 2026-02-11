@@ -11,7 +11,7 @@ const User = {
     const result = await query(
       `INSERT INTO users (phone, phone_hash, name, language_code)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, phone, name, profile_image_url, language_code, created_at`,
+       RETURNING id, phone, name, profile_image_url, language_code, target_language, created_at`,
       [phone, phoneHash, name, language_code || 'en']
     );
     return result.rows[0];
@@ -19,7 +19,7 @@ const User = {
 
   async findById(id) {
     const result = await query(
-      `SELECT id, phone, name, profile_image_url, language_code, fcm_token, is_active, created_at, updated_at
+      `SELECT id, phone, name, profile_image_url, language_code, target_language, fcm_token, is_active, created_at, updated_at
        FROM users WHERE id = $1`,
       [id]
     );
@@ -28,7 +28,7 @@ const User = {
 
   async findByPhone(phone) {
     const result = await query(
-      `SELECT id, phone, name, profile_image_url, language_code, fcm_token, is_active, created_at, updated_at
+      `SELECT id, phone, name, profile_image_url, language_code, target_language, fcm_token, is_active, created_at, updated_at
        FROM users WHERE phone = $1`,
       [phone]
     );
@@ -37,7 +37,7 @@ const User = {
 
   async findByPhoneHash(phoneHash) {
     const result = await query(
-      `SELECT id, phone, name, profile_image_url, language_code, is_active
+      `SELECT id, phone, name, profile_image_url, language_code, target_language, is_active
        FROM users WHERE phone_hash = $1 AND is_active = true`,
       [phoneHash]
     );
@@ -48,7 +48,7 @@ const User = {
     if (!phoneHashes.length) return [];
     const placeholders = phoneHashes.map((_, i) => `$${i + 1}`).join(', ');
     const result = await query(
-      `SELECT id, phone, name, profile_image_url, language_code
+      `SELECT id, phone, name, profile_image_url, language_code, target_language
        FROM users WHERE phone_hash IN (${placeholders}) AND is_active = true`,
       phoneHashes
     );
@@ -71,7 +71,7 @@ const User = {
 
     const result = await query(
       `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIndex}
-       RETURNING id, phone, name, profile_image_url, language_code, updated_at`,
+       RETURNING id, phone, name, profile_image_url, language_code, target_language, updated_at`,
       values
     );
     return result.rows[0] || null;
@@ -86,10 +86,11 @@ const User = {
 
   async findOrCreate(phone) {
     let user = await this.findByPhone(phone);
-    if (!user) {
-      user = await this.create({ phone });
+    if (user) {
+      return { user, isNew: false };
     }
-    return user;
+    user = await this.create({ phone });
+    return { user, isNew: true };
   },
 };
 

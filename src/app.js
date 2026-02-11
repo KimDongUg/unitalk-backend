@@ -16,6 +16,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const contactRoutes = require('./routes/contacts');
 const messageRoutes = require('./routes/messages');
+const chatRoomRoutes = require('./routes/chatrooms');
 
 const app = express();
 const server = http.createServer(app);
@@ -38,13 +39,23 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 app.use('/api/', apiLimiter);
+app.use('/auth/', apiLimiter);
+app.use('/users/', apiLimiter);
+app.use('/contacts/', apiLimiter);
+app.use('/chatrooms/', apiLimiter);
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// API routes
+// New API routes (frontend spec)
+app.use('/auth', authRoutes);
+app.use('/users', userRoutes);
+app.use('/contacts', contactRoutes);
+app.use('/chatrooms', chatRoomRoutes);
+
+// Legacy API routes (backward compatibility)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/contacts', contactRoutes);

@@ -32,7 +32,7 @@ const authController = {
 
   async verifyOtp(req, res, next) {
     try {
-      const { phone, otp } = req.validatedBody;
+      const { phone, code } = req.validatedBody;
 
       // Get stored OTP from Redis
       const storedOtp = await cacheService.getRaw(`otp:${phone}`);
@@ -41,7 +41,7 @@ const authController = {
         return res.status(400).json({ error: 'OTP expired or not found' });
       }
 
-      if (storedOtp !== otp) {
+      if (storedOtp !== code) {
         return res.status(400).json({ error: 'Invalid OTP' });
       }
 
@@ -49,7 +49,7 @@ const authController = {
       await cacheService.del(`otp:${phone}`);
 
       // Find or create user
-      const user = await User.findOrCreate(phone);
+      const { user, isNew } = await User.findOrCreate(phone);
 
       // Generate JWT
       const token = jwt.sign(
@@ -62,13 +62,63 @@ const authController = {
       res.json({
         success: true,
         token,
+        isNew,
         user: {
           id: user.id,
           phone: user.phone,
           name: user.name,
           language_code: user.language_code,
+          target_language: user.target_language,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getMe(req, res, next) {
+    try {
+      const user = await User.findById(req.user.id);
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          phone: user.phone,
+          name: user.name,
+          profile_image_url: user.profile_image_url,
+          language_code: user.language_code,
+          target_language: user.target_language,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async logout(req, res, next) {
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.split(' ')[1];
+
+      if (token) {
+        // Decode to get expiration
+        const decoded = jwt.decode(token);
+        if (decoded && decoded.exp) {
+          const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+          if (ttl > 0) {
+            // Store token in Redis blacklist until it expires
+            await cacheService.setRaw(`blacklist:${token}`, '1', ttl);
+          }
+        }
+      }
+
+      logger.info(`User logged out: ${req.user.id}`);
+      res.json({ success: true });
     } catch (error) {
       next(error);
     }

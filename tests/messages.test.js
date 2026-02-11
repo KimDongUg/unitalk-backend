@@ -7,6 +7,7 @@ const { query } = require('../src/config/database');
 const { app } = require('../src/app');
 
 const TEST_USER_ID = '550e8400-e29b-41d4-a716-446655440000';
+const TEST_OTHER_USER_ID = '550e8400-e29b-41d4-a716-446655440001';
 const TEST_CONVERSATION_ID = '660e8400-e29b-41d4-a716-446655440000';
 
 function generateToken(userId = TEST_USER_ID) {
@@ -15,16 +16,72 @@ function generateToken(userId = TEST_USER_ID) {
   });
 }
 
-describe('Messages API', () => {
+describe('Chat Rooms & Messages API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('GET /api/messages/:conversationId', () => {
-    test('should return messages for authorized user', async () => {
+  describe('POST /chatrooms', () => {
+    test('should create a new chat room', async () => {
       const token = generateToken();
 
-      // Mock conversation participant check
+      // Mock findOrCreate: findById (no existing) then insert
+      query
+        .mockResolvedValueOnce({ rows: [] }) // findOrCreate - no existing conversation
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_CONVERSATION_ID,
+              user1_id: TEST_USER_ID,
+              user2_id: TEST_OTHER_USER_ID,
+              last_message_at: new Date(),
+              created_at: new Date(),
+            },
+          ],
+        }); // insert conversation
+
+      const res = await request(app)
+        .post('/chatrooms')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ userId: TEST_USER_ID, otherUserId: TEST_OTHER_USER_ID });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.chatRoom).toBeDefined();
+      expect(res.body.isNew).toBe(true);
+    });
+
+    test('should return existing chat room', async () => {
+      const token = generateToken();
+
+      // Mock findOrCreate: found existing
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: TEST_CONVERSATION_ID,
+            user1_id: TEST_USER_ID,
+            user2_id: TEST_OTHER_USER_ID,
+            last_message_at: new Date(),
+            created_at: new Date(),
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .post('/chatrooms')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ userId: TEST_USER_ID, otherUserId: TEST_OTHER_USER_ID });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.isNew).toBe(false);
+    });
+  });
+
+  describe('GET /chatrooms/:id/messages', () => {
+    test('should return messages with page-based pagination', async () => {
+      const token = generateToken();
+
       query
         .mockResolvedValueOnce({ rows: [{ '1': 1 }] }) // isParticipant
         .mockResolvedValueOnce({
@@ -34,6 +91,7 @@ describe('Messages API', () => {
               phone: '+821012345678',
               name: 'Alice',
               language_code: 'ko',
+              target_language: 'en',
             },
           ],
         }) // findById (user)
@@ -44,6 +102,8 @@ describe('Messages API', () => {
               sender_id: TEST_USER_ID,
               original_text: 'Hello',
               translated_texts: { ko: '안녕하세요' },
+              sender_language: 'en',
+              original_language: 'en',
               created_at: new Date(),
               read_at: null,
             },
@@ -52,14 +112,17 @@ describe('Messages API', () => {
         .mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count
 
       const res = await request(app)
-        .get(`/api/messages/${TEST_CONVERSATION_ID}`)
+        .get(`/chatrooms/${TEST_CONVERSATION_ID}/messages?page=1&limit=50`)
         .set('Authorization', `Bearer ${token}`);
 
       expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
       expect(res.body.messages).toBeDefined();
       expect(Array.isArray(res.body.messages)).toBe(true);
+      expect(res.body.messages[0].senderLang).toBe('en');
       expect(res.body.total).toBeDefined();
-      expect(res.body.has_more).toBeDefined();
+      expect(res.body.page).toBe(1);
+      expect(res.body.hasMore).toBeDefined();
     });
 
     test('should deny access to non-participant', async () => {
@@ -69,7 +132,7 @@ describe('Messages API', () => {
       query.mockResolvedValueOnce({ rows: [] });
 
       const res = await request(app)
-        .get(`/api/messages/${TEST_CONVERSATION_ID}`)
+        .get(`/chatrooms/${TEST_CONVERSATION_ID}/messages?page=1`)
         .set('Authorization', `Bearer ${token}`);
 
       expect(res.statusCode).toBe(403);
@@ -78,14 +141,123 @@ describe('Messages API', () => {
 
     test('should require authentication', async () => {
       const res = await request(app).get(
-        `/api/messages/${TEST_CONVERSATION_ID}`
+        `/chatrooms/${TEST_CONVERSATION_ID}/messages`
       );
 
       expect(res.statusCode).toBe(401);
     });
   });
 
-  describe('POST /api/messages/read', () => {
+  describe('POST /chatrooms/:id/messages', () => {
+    test('should send a message with senderLang', async () => {
+      const token = generateToken();
+
+      query
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_CONVERSATION_ID,
+              user1_id: TEST_USER_ID,
+              user2_id: TEST_OTHER_USER_ID,
+            },
+          ],
+        }) // findById (conversation)
+        .mockResolvedValueOnce({ rows: [{ '1': 1 }] }) // isParticipant
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_OTHER_USER_ID,
+              name: 'Bob',
+              language_code: 'en',
+              fcm_token: null,
+              is_active: true,
+            },
+          ],
+        }) // findById (recipient)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_USER_ID,
+              name: 'Alice',
+              language_code: 'ko',
+            },
+          ],
+        }) // findById (sender)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'msg-new',
+              conversation_id: TEST_CONVERSATION_ID,
+              sender_id: TEST_USER_ID,
+              original_text: '안녕하세요',
+              original_language: 'ko',
+              sender_language: 'ko',
+              translated_texts: { en: 'Hello' },
+              created_at: new Date(),
+            },
+          ],
+        }) // Message.create
+        .mockResolvedValueOnce({ rows: [] }); // updateLastMessage
+
+      const res = await request(app)
+        .post(`/chatrooms/${TEST_CONVERSATION_ID}/messages`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          text: '안녕하세요',
+          user: { _id: TEST_USER_ID },
+          senderLang: 'ko',
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toBeDefined();
+      expect(res.body.message.senderLang).toBe('ko');
+    });
+  });
+
+  describe('GET /users/:userId/chatrooms', () => {
+    test('should return user chat rooms', async () => {
+      const token = generateToken();
+
+      // Mock findByUserId
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: TEST_CONVERSATION_ID,
+            user1_id: TEST_USER_ID,
+            user2_id: TEST_OTHER_USER_ID,
+            other_user_id: TEST_OTHER_USER_ID,
+            last_message_at: new Date(),
+          },
+        ],
+      });
+
+      // Mock findById (other user) and unread count
+      query
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_OTHER_USER_ID,
+              name: 'Bob',
+              profile_image_url: null,
+              language_code: 'en',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [{ count: '3' }] });
+
+      const res = await request(app)
+        .get(`/users/${TEST_USER_ID}/chatrooms`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.chatRooms).toBeDefined();
+      expect(Array.isArray(res.body.chatRooms)).toBe(true);
+    });
+  });
+
+  describe('POST /api/messages/read (legacy)', () => {
     test('should mark messages as read', async () => {
       const token = generateToken();
       const messageIds = [
@@ -125,47 +297,6 @@ describe('Messages API', () => {
         .send({ message_ids: ['not-a-uuid'] });
 
       expect(res.statusCode).toBe(400);
-    });
-  });
-
-  describe('GET /api/messages/conversations', () => {
-    test('should return user conversations', async () => {
-      const token = generateToken();
-
-      // Mock findByUserId
-      query.mockResolvedValueOnce({
-        rows: [
-          {
-            id: TEST_CONVERSATION_ID,
-            user1_id: TEST_USER_ID,
-            user2_id: '550e8400-e29b-41d4-a716-446655440001',
-            other_user_id: '550e8400-e29b-41d4-a716-446655440001',
-            last_message_at: new Date(),
-          },
-        ],
-      });
-
-      // Mock findById (other user) and unread count
-      query
-        .mockResolvedValueOnce({
-          rows: [
-            {
-              id: '550e8400-e29b-41d4-a716-446655440001',
-              name: 'Bob',
-              profile_image_url: null,
-              language_code: 'en',
-            },
-          ],
-        })
-        .mockResolvedValueOnce({ rows: [{ count: '3' }] });
-
-      const res = await request(app)
-        .get('/api/messages/conversations')
-        .set('Authorization', `Bearer ${token}`);
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body.conversations).toBeDefined();
-      expect(Array.isArray(res.body.conversations)).toBe(true);
     });
   });
 });

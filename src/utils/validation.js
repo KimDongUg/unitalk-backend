@@ -13,12 +13,18 @@ const verifyOtpSchema = Joi.object({
   phone: Joi.string()
     .pattern(/^\+[1-9]\d{1,14}$/)
     .required(),
-  otp: Joi.string().length(6).required(),
+  code: Joi.string().length(6).required(),
 });
 
 const updateUserSchema = Joi.object({
   name: Joi.string().min(1).max(100),
   language_code: Joi.string().min(2).max(10),
+}).min(1);
+
+const updateProfileSchema = Joi.object({
+  nickname: Joi.string().min(1).max(100),
+  nativeLang: Joi.string().min(2).max(10),
+  targetLang: Joi.string().min(2).max(10),
 }).min(1);
 
 const fcmTokenSchema = Joi.object({
@@ -33,9 +39,31 @@ const syncContactsSchema = Joi.object({
     .required(),
 });
 
+const syncContactsSchemaV2 = Joi.object({
+  userId: Joi.string().uuid().required(),
+  phoneHashes: Joi.array()
+    .items(Joi.string().hex().length(64))
+    .min(1)
+    .max(1000)
+    .required(),
+});
+
 const sendMessageSchema = Joi.object({
   conversation_id: Joi.string().uuid().required(),
   text: Joi.string().min(1).max(10000).required(),
+});
+
+const createChatRoomSchema = Joi.object({
+  userId: Joi.string().uuid().required(),
+  otherUserId: Joi.string().uuid().required(),
+});
+
+const sendChatMessageSchema = Joi.object({
+  text: Joi.string().min(1).max(10000).required(),
+  user: Joi.object({
+    _id: Joi.string().uuid().required(),
+  }).required(),
+  senderLang: Joi.string().min(2).max(10).required(),
 });
 
 const readMessagesSchema = Joi.object({
@@ -45,6 +73,11 @@ const readMessagesSchema = Joi.object({
 const paginationSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(50),
   offset: Joi.number().integer().min(0).default(0),
+});
+
+const pageBasedPaginationSchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(50),
 });
 
 const validate = (schema) => (req, res, next) => {
@@ -71,11 +104,16 @@ module.exports = {
   sendOtpSchema,
   verifyOtpSchema,
   updateUserSchema,
+  updateProfileSchema,
   fcmTokenSchema,
   syncContactsSchema,
+  syncContactsSchemaV2,
   sendMessageSchema,
+  createChatRoomSchema,
+  sendChatMessageSchema,
   readMessagesSchema,
   paginationSchema,
+  pageBasedPaginationSchema,
   validate,
   validateQuery,
 };

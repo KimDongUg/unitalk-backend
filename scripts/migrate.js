@@ -83,6 +83,18 @@ const migrations = [
       );
     `,
   },
+  {
+    name: '006_add_sender_language_to_messages',
+    sql: `
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_language VARCHAR(10);
+    `,
+  },
+  {
+    name: '007_add_target_language_to_users',
+    sql: `
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS target_language VARCHAR(10);
+    `,
+  },
 ];
 
 async function migrate() {

@@ -6,13 +6,9 @@ const logger = require('../utils/logger');
 const contactController = {
   async syncContacts(req, res, next) {
     try {
-      const { contacts } = req.validatedBody;
-      const userId = req.user.id;
+      const { userId, phoneHashes } = req.validatedBody;
 
-      // Hash all phone numbers
-      const phoneHashes = contacts.map((phone) => User.hashPhone(phone));
-
-      // Find matching users in DB
+      // Find matching users in DB using pre-hashed phone numbers
       const matchedUsers = await User.findByPhoneHashes(phoneHashes);
 
       // Filter out the requesting user
@@ -45,7 +41,7 @@ const contactController = {
       );
 
       logger.info(`Contacts synced for user ${userId}: ${friends.length} matches`);
-      res.json({ friends: enrichedFriends, count: enrichedFriends.length });
+      res.json({ success: true, friends: enrichedFriends });
     } catch (error) {
       next(error);
     }
@@ -53,7 +49,7 @@ const contactController = {
 
   async getFriends(req, res, next) {
     try {
-      const userId = req.user.id;
+      const userId = req.params.userId;
 
       const result = await query(
         `SELECT u.id, u.name, u.profile_image_url, u.language_code
@@ -74,7 +70,7 @@ const contactController = {
         })
       );
 
-      res.json({ friends });
+      res.json({ success: true, friends });
     } catch (error) {
       next(error);
     }

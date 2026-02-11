@@ -210,7 +210,7 @@ function setupSocket(io) {
       if (!socket.userId) return;
 
       try {
-        const conversation = await Conversation.findOrCreate(
+        const { conversation } = await Conversation.findOrCreate(
           socket.userId,
           user_id
         );

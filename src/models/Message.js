@@ -1,12 +1,12 @@
 const { query } = require('../config/database');
 
 const Message = {
-  async create({ conversation_id, sender_id, original_text, original_language, translated_texts }) {
+  async create({ conversation_id, sender_id, original_text, original_language, translated_texts, sender_language }) {
     const result = await query(
-      `INSERT INTO messages (conversation_id, sender_id, original_text, original_language, translated_texts)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO messages (conversation_id, sender_id, original_text, original_language, translated_texts, sender_language)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [conversation_id, sender_id, original_text, original_language, JSON.stringify(translated_texts)]
+      [conversation_id, sender_id, original_text, original_language, JSON.stringify(translated_texts), sender_language || null]
     );
     return result.rows[0];
   },
