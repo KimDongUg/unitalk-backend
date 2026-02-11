@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 const config = require('./env');
 const logger = require('../utils/logger');
 
-const pool = new Pool({
+const poolConfig = {
   host: config.db.host,
   port: config.db.port,
   database: config.db.name,
@@ -11,7 +11,13 @@ const pool = new Pool({
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
-});
+};
+
+if (process.env.DB_SSL === 'true') {
+  poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 pool.on('connect', () => {
   logger.info('PostgreSQL connected');

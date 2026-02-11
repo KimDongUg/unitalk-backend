@@ -3,8 +3,8 @@ module.exports = {
     {
       name: 'unitalk-backend',
       script: 'src/app.js',
-      instances: 'max',
-      exec_mode: 'cluster',
+      instances: 1,
+      exec_mode: 'fork',
       env: {
         NODE_ENV: 'development',
         PORT: 3000,
@@ -18,6 +18,8 @@ module.exports = {
       out_file: 'logs/out.log',
       merge_logs: true,
       max_memory_restart: '1G',
+      autorestart: true,
+      restart_delay: 2000,
     },
   ],
 };
