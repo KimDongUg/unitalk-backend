@@ -246,6 +246,34 @@ const migrations = [
       ON CONFLICT DO NOTHING;
     `,
   },
+  {
+    name: '016_seed_hannam_university',
+    sql: `
+      INSERT INTO universities (name, name_en, domain, country)
+      VALUES ('한남대학교', 'Hannam University', 'hnu.kr', 'KR')
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO groups (university_id, name, description, category, type, is_public)
+      SELECT u.id, '새내기 Q&A / Freshman Q&A', '신입생 질문 및 답변 / Questions and answers for new students', 'freshman', 'default', true
+      FROM universities u WHERE u.domain = 'hnu.kr'
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO groups (university_id, name, description, category, type, is_public)
+      SELECT u.id, '생활/행정 / Campus Life', '캠퍼스 생활 및 행정 정보 / Campus life and administrative info', 'life', 'default', true
+      FROM universities u WHERE u.domain = 'hnu.kr'
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO groups (university_id, name, description, category, type, is_public)
+      SELECT u.id, '팀플/연구 / Study & Research', '팀 프로젝트 및 연구 모집 / Team projects and research recruitment', 'study', 'default', true
+      FROM universities u WHERE u.domain = 'hnu.kr'
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO groups (university_id, name, description, category, type, is_public)
+      SELECT u.id, '자유게시판 / Free Board', '자유로운 대화 / Free discussion', 'general', 'default', true
+      FROM universities u WHERE u.domain = 'hnu.kr'
+      ON CONFLICT DO NOTHING;
+    `,
+  },
 ];
 
 async function migrate() {
