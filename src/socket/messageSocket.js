@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 const User = require('../models/User');
+const UserDevice = require('../models/UserDevice');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const Group = require('../models/Group');
@@ -15,9 +16,11 @@ function setupSocket(io) {
   io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
 
-    // 1. Authentication
-    socket.on('authenticate', async (token) => {
+    // 1. Authentication (multi-device aware)
+    socket.on('authenticate', async (data) => {
       try {
+        // Support both string token and {token, deviceType} object
+        const token = typeof data === 'string' ? data : data.token;
         const decoded = jwt.verify(token, config.jwt.secret);
         const user = await User.findById(decoded.id);
 
@@ -27,8 +30,18 @@ function setupSocket(io) {
           return;
         }
 
+        const deviceType = decoded.deviceType || (typeof data === 'object' && data.deviceType) || 'mobile';
+
         socket.userId = user.id;
+        socket.deviceType = deviceType;
+
+        // Join user-level room (all devices)
         socket.join(`user:${user.id}`);
+        // Join device-specific room
+        socket.join(`user:${user.id}:${deviceType}`);
+
+        // Update device online status with socket ID
+        await UserDevice.setOnline(user.id, deviceType, socket.id);
 
         // Store online status in Redis
         await cacheService.setRaw(`online:${user.id}`, Date.now().toString());
@@ -47,12 +60,18 @@ function setupSocket(io) {
         for (const friend of friends) {
           io.to(`user:${friend.contact_user_id}`).emit('friend_online', {
             user_id: user.id,
+            deviceType,
             timestamp: Date.now(),
           });
         }
 
-        socket.emit('authenticated', { success: true });
-        logger.info(`User authenticated via socket: ${user.id}`);
+        // QR login: join QR token room if PC is waiting
+        if (typeof data === 'object' && data.qrToken) {
+          socket.join(`qr:${data.qrToken}`);
+        }
+
+        socket.emit('authenticated', { success: true, deviceType });
+        logger.info(`User authenticated via socket: ${user.id} (${deviceType})`);
       } catch (error) {
         logger.error('Socket auth error:', error);
         socket.emit('error', { message: 'Authentication failed' });
@@ -89,7 +108,7 @@ function setupSocket(io) {
       socket.emit('room_left', { conversation_id });
     });
 
-    // 4. Send message
+    // 4. Send message (multi-device: broadcasts to all sender's devices too)
     socket.on('send_message', async (data) => {
       if (!socket.userId) {
         socket.emit('error', { message: 'Not authenticated' });
@@ -152,45 +171,49 @@ function setupSocket(io) {
           }
         }
 
-        // Save to database
+        // Save to database with source device
         const message = await Message.create({
           conversation_id,
           sender_id: socket.userId,
           original_text: text,
           original_language: detectedLang,
           translated_texts: translatedTexts,
+          source_device: socket.deviceType || 'mobile',
         });
 
         // Update conversation last_message_at
         await Conversation.updateLastMessage(conversation_id);
 
-        // Confirm to sender
+        // Confirm to sender (this specific socket)
         socket.emit('message_sent', {
           temp_id,
           message_id: message.id,
           created_at: message.created_at,
         });
 
+        const messagePayload = {
+          message_id: message.id,
+          conversation_id,
+          sender_id: socket.userId,
+          sender_name: sender.name,
+          text,
+          original_text: text,
+          translated_texts: translatedTexts,
+          source_device: socket.deviceType || 'mobile',
+          created_at: message.created_at,
+        };
+
         if (conversation.group_id) {
-          // Group: broadcast to room
-          io.to(`room:${conversation_id}`).emit('new_message', {
-            message_id: message.id,
-            conversation_id,
-            group_id: conversation.group_id,
-            sender_id: socket.userId,
-            sender_name: sender.name,
-            text,
-            original_text: text,
-            translated_texts: translatedTexts,
-            created_at: message.created_at,
-          });
+          messagePayload.group_id = conversation.group_id;
+          // Group: broadcast to room (all devices in the room get it)
+          io.to(`room:${conversation_id}`).emit('new_message', messagePayload);
 
           // Push notifications to offline group members
           const members = await GroupMember.getMembers(conversation.group_id);
           for (const member of members) {
             if (member.id === socket.userId) continue;
-            const isOnline = await cacheService.exists(`online:${member.id}`);
-            if (!isOnline && member.fcm_token) {
+            const hasOnlineDevice = await UserDevice.isAnyDeviceOnline(member.id);
+            if (!hasOnlineDevice && member.fcm_token) {
               const memberText = translatedTexts[member.language_code] || text;
               await pushService.sendNotification(member.fcm_token, {
                 title: `${sender.name} in group`,
@@ -205,7 +228,7 @@ function setupSocket(io) {
             }
           }
         } else {
-          // 1:1: send to recipient
+          // 1:1: send to recipient's all devices + sender's other devices
           const recipientId =
             conversation.user1_id === socket.userId
               ? conversation.user2_id
@@ -215,19 +238,18 @@ function setupSocket(io) {
           const recipientText =
             translatedTexts[recipient.language_code] || text;
 
+          // Send to all recipient devices
           io.to(`user:${recipientId}`).emit('new_message', {
-            message_id: message.id,
-            conversation_id,
-            sender_id: socket.userId,
-            sender_name: sender.name,
+            ...messagePayload,
             text: recipientText,
-            original_text: text,
-            created_at: message.created_at,
           });
 
-          // Push notification if recipient is offline
-          const isOnline = await cacheService.exists(`online:${recipientId}`);
-          if (!isOnline && recipient.fcm_token) {
+          // Sync to sender's other devices (exclude current socket)
+          socket.to(`user:${socket.userId}`).emit('new_message', messagePayload);
+
+          // Push notification: only if no device is online
+          const hasOnlineDevice = await UserDevice.isAnyDeviceOnline(recipientId);
+          if (!hasOnlineDevice && recipient.fcm_token) {
             await pushService.sendNotification(recipient.fcm_token, {
               title: sender.name || 'New message',
               body: recipientText,
@@ -240,7 +262,7 @@ function setupSocket(io) {
           }
         }
 
-        logger.info(`Message sent in conversation ${conversation_id}`);
+        logger.info(`Message sent in conversation ${conversation_id} from ${socket.deviceType}`);
       } catch (error) {
         logger.error('Send message error:', error);
         socket.emit('error', { message: error.message });
@@ -281,7 +303,7 @@ function setupSocket(io) {
       }
     });
 
-    // 6. Mark messages as read
+    // 6. Mark messages as read (sync across devices)
     socket.on('mark_read', async ({ message_ids }) => {
       if (!socket.userId) return;
 
@@ -303,6 +325,12 @@ function setupSocket(io) {
             read_at: Date.now(),
           });
         }
+
+        // Sync read status to user's other devices
+        socket.to(`user:${socket.userId}`).emit('messages_read_sync', {
+          message_ids,
+          read_at: Date.now(),
+        });
       } catch (error) {
         logger.error('Mark read error:', error);
       }
@@ -324,28 +352,34 @@ function setupSocket(io) {
       }
     });
 
-    // 8. Disconnect
+    // 8. Disconnect (multi-device aware)
     socket.on('disconnect', async () => {
       if (socket.userId) {
-        // Remove online status
-        await cacheService.del(`online:${socket.userId}`);
+        // Set this specific device offline
+        await UserDevice.setOfflineBySocketId(socket.id);
 
-        // Store last seen
-        await cacheService.setRaw(
-          `lastseen:${socket.userId}`,
-          new Date().toISOString()
-        );
+        // Only remove online status if NO devices are online
+        const hasOnlineDevice = await UserDevice.isAnyDeviceOnline(socket.userId);
+        if (!hasOnlineDevice) {
+          await cacheService.del(`online:${socket.userId}`);
 
-        // Notify friends about offline status
-        const friends = await getUserFriends(socket.userId);
-        for (const friend of friends) {
-          io.to(`user:${friend.contact_user_id}`).emit('friend_offline', {
-            user_id: socket.userId,
-            last_seen: Date.now(),
-          });
+          // Store last seen
+          await cacheService.setRaw(
+            `lastseen:${socket.userId}`,
+            new Date().toISOString()
+          );
+
+          // Notify friends about offline status
+          const friends = await getUserFriends(socket.userId);
+          for (const friend of friends) {
+            io.to(`user:${friend.contact_user_id}`).emit('friend_offline', {
+              user_id: socket.userId,
+              last_seen: Date.now(),
+            });
+          }
         }
 
-        logger.info(`User disconnected: ${socket.userId}`);
+        logger.info(`User disconnected: ${socket.userId} (${socket.deviceType || 'unknown'})`);
       }
     });
   });

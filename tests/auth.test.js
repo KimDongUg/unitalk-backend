@@ -101,6 +101,10 @@ describe('Authentication', () => {
           },
         ],
       });
+      // Mock UserDevice.upsert
+      query.mockResolvedValueOnce({
+        rows: [{ id: 'device-1', user_id: '550e8400-e29b-41d4-a716-446655440099', device_type: 'mobile' }],
+      });
 
       const res = await request(app)
         .post('/auth/login')
@@ -110,6 +114,39 @@ describe('Authentication', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.token).toBeDefined();
       expect(res.body.user.nickname).toBe('TestUser');
+    });
+
+    test('should login with deviceType pc', async () => {
+      const hashedPassword = await bcrypt.hash('password123', 12);
+
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: '550e8400-e29b-41d4-a716-446655440099',
+            name: 'TestUser',
+            password: hashedPassword,
+            language_code: 'ko',
+            target_language: 'en',
+            university_id: TEST_UNIVERSITY_ID,
+          },
+        ],
+      });
+      // Mock UserDevice.upsert for PC
+      query.mockResolvedValueOnce({
+        rows: [{ id: 'device-pc', user_id: '550e8400-e29b-41d4-a716-446655440099', device_type: 'pc' }],
+      });
+
+      const res = await request(app)
+        .post('/auth/login')
+        .send({ nickname: 'TestUser', password: 'password123', deviceType: 'pc', deviceName: 'My PC' });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.token).toBeDefined();
+
+      // Verify token includes deviceType
+      const decoded = jwt.verify(res.body.token, 'test_jwt_secret');
+      expect(decoded.deviceType).toBe('pc');
     });
 
     test('should reject invalid password', async () => {
@@ -142,6 +179,132 @@ describe('Authentication', () => {
 
       expect(res.statusCode).toBe(401);
       expect(res.body.error).toBe('Invalid nickname or password');
+    });
+  });
+
+  describe('QR Login', () => {
+    test('POST /auth/qr/generate should return qrToken', async () => {
+      const res = await request(app).post('/auth/qr/generate');
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.qrToken).toBeDefined();
+      expect(res.body.expiresIn).toBe(180);
+    });
+
+    test('POST /auth/qr/verify should approve QR login', async () => {
+      const token = jwt.sign(
+        { id: '550e8400-e29b-41d4-a716-446655440099', nickname: 'TestUser', universityId: TEST_UNIVERSITY_ID },
+        'test_jwt_secret',
+        { expiresIn: '1d' }
+      );
+
+      // Mock Redis: qr token exists and is pending
+      redisClient.get.mockResolvedValueOnce('pending');
+      // Mock User.findById
+      query.mockResolvedValueOnce({
+        rows: [{
+          id: '550e8400-e29b-41d4-a716-446655440099',
+          name: 'TestUser',
+          university_id: TEST_UNIVERSITY_ID,
+          language_code: 'ko',
+          target_language: 'en',
+        }],
+      });
+      // Mock UserDevice.upsert for PC
+      query.mockResolvedValueOnce({
+        rows: [{ id: 'device-pc', device_type: 'pc' }],
+      });
+
+      const res = await request(app)
+        .post('/auth/qr/verify')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ qrToken: 'test-qr-token-123' });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toBe('QR login approved');
+    });
+
+    test('POST /auth/qr/verify should reject expired QR', async () => {
+      const token = jwt.sign(
+        { id: '550e8400-e29b-41d4-a716-446655440099', nickname: 'TestUser' },
+        'test_jwt_secret',
+        { expiresIn: '1d' }
+      );
+
+      // QR token not found in Redis
+      redisClient.get.mockResolvedValueOnce(null);
+
+      const res = await request(app)
+        .post('/auth/qr/verify')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ qrToken: 'expired-token' });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toBe('QR code expired or invalid');
+    });
+  });
+
+  describe('Device Management', () => {
+    test('GET /auth/devices should return user devices', async () => {
+      const token = jwt.sign(
+        { id: '550e8400-e29b-41d4-a716-446655440099' },
+        'test_jwt_secret',
+        { expiresIn: '1d' }
+      );
+
+      // Mock UserDevice.findByUserId
+      query.mockResolvedValueOnce({
+        rows: [
+          { id: 'dev-1', user_id: '550e8400-e29b-41d4-a716-446655440099', device_type: 'mobile', is_online: true },
+          { id: 'dev-2', user_id: '550e8400-e29b-41d4-a716-446655440099', device_type: 'pc', is_online: false },
+        ],
+      });
+
+      const res = await request(app)
+        .get('/auth/devices')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.devices).toHaveLength(2);
+    });
+
+    test('DELETE /auth/devices/:deviceId should remove device', async () => {
+      const token = jwt.sign(
+        { id: '550e8400-e29b-41d4-a716-446655440099' },
+        'test_jwt_secret',
+        { expiresIn: '1d' }
+      );
+
+      // Mock UserDevice.remove
+      query.mockResolvedValueOnce({
+        rows: [{ id: 'dev-2', device_type: 'pc' }],
+      });
+
+      const res = await request(app)
+        .delete('/auth/devices/dev-2')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    test('DELETE /auth/devices/:deviceId should return 404 for non-existent device', async () => {
+      const token = jwt.sign(
+        { id: '550e8400-e29b-41d4-a716-446655440099' },
+        'test_jwt_secret',
+        { expiresIn: '1d' }
+      );
+
+      query.mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(app)
+        .delete('/auth/devices/non-existent')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.statusCode).toBe(404);
     });
   });
 

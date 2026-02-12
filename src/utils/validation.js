@@ -103,6 +103,17 @@ const announcementSchema = Joi.object({
   senderLang: Joi.string().min(2).max(10).required(),
 });
 
+const loginWithDeviceSchema = Joi.object({
+  nickname: Joi.string().min(1).max(100).required(),
+  password: Joi.string().min(1).max(100).required(),
+  deviceType: Joi.string().valid('mobile', 'pc', 'tablet').default('mobile'),
+  deviceName: Joi.string().max(100),
+});
+
+const qrVerifySchema = Joi.object({
+  qrToken: Joi.string().required(),
+});
+
 const readMessagesSchema = Joi.object({
   message_ids: Joi.array().items(Joi.string().uuid()).min(1).required(),
 });
@@ -157,6 +168,8 @@ module.exports = {
   groupListSchema,
   createGroupSchema,
   announcementSchema,
+  loginWithDeviceSchema,
+  qrVerifySchema,
   validate,
   validateQuery,
 };

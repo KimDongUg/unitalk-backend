@@ -274,6 +274,31 @@ const migrations = [
       ON CONFLICT DO NOTHING;
     `,
   },
+  {
+    name: '017_create_user_devices',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_devices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        device_type VARCHAR(10) NOT NULL CHECK (device_type IN ('mobile', 'pc', 'tablet')),
+        device_name VARCHAR(100),
+        device_token VARCHAR(500),
+        socket_id VARCHAR(100),
+        is_online BOOLEAN DEFAULT false,
+        last_active_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, device_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_devices_online ON user_devices(user_id, is_online);
+    `,
+  },
+  {
+    name: '018_add_message_source_device',
+    sql: `
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS source_device VARCHAR(10) DEFAULT 'mobile';
+    `,
+  },
 ];
 
 async function migrate() {
