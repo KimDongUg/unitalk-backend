@@ -17,6 +17,8 @@ const userRoutes = require('./routes/users');
 const contactRoutes = require('./routes/contacts');
 const messageRoutes = require('./routes/messages');
 const chatRoomRoutes = require('./routes/chatrooms');
+const universityRoutes = require('./routes/universities');
+const groupRoutes = require('./routes/groups');
 
 const app = express();
 const server = http.createServer(app);
@@ -37,6 +39,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Share Socket.io instance with controllers
+app.set('io', io);
+
 // Rate limiting
 app.use('/api/', apiLimiter);
 app.use('/auth/', apiLimiter);
@@ -54,6 +59,8 @@ app.use('/auth', authRoutes);
 app.use('/users', userRoutes);
 app.use('/contacts', contactRoutes);
 app.use('/chatrooms', chatRoomRoutes);
+app.use('/api/universities', universityRoutes);
+app.use('/api/groups', groupRoutes);
 
 // Legacy API routes (backward compatibility)
 app.use('/api/auth', authRoutes);

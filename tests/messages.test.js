@@ -166,6 +166,15 @@ describe('Chat Rooms & Messages API', () => {
         .mockResolvedValueOnce({
           rows: [
             {
+              id: TEST_USER_ID,
+              name: 'Alice',
+              language_code: 'ko',
+            },
+          ],
+        }) // findById (sender)
+        .mockResolvedValueOnce({
+          rows: [
+            {
               id: TEST_OTHER_USER_ID,
               name: 'Bob',
               language_code: 'en',
@@ -174,15 +183,6 @@ describe('Chat Rooms & Messages API', () => {
             },
           ],
         }) // findById (recipient)
-        .mockResolvedValueOnce({
-          rows: [
-            {
-              id: TEST_USER_ID,
-              name: 'Alice',
-              language_code: 'ko',
-            },
-          ],
-        }) // findById (sender)
         .mockResolvedValueOnce({
           rows: [
             {
@@ -197,7 +197,18 @@ describe('Chat Rooms & Messages API', () => {
             },
           ],
         }) // Message.create
-        .mockResolvedValueOnce({ rows: [] }); // updateLastMessage
+        .mockResolvedValueOnce({ rows: [] }) // updateLastMessage
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: TEST_OTHER_USER_ID,
+              name: 'Bob',
+              language_code: 'en',
+              fcm_token: null,
+              is_active: true,
+            },
+          ],
+        }); // findById (recipient again for push notification)
 
       const res = await request(app)
         .post(`/chatrooms/${TEST_CONVERSATION_ID}/messages`)
@@ -216,10 +227,10 @@ describe('Chat Rooms & Messages API', () => {
   });
 
   describe('GET /users/:userId/chatrooms', () => {
-    test('should return user chat rooms', async () => {
+    test('should return user chat rooms (dm + group)', async () => {
       const token = generateToken();
 
-      // Mock findByUserId
+      // Mock findByUserId - returns both dm and group conversations
       query.mockResolvedValueOnce({
         rows: [
           {
@@ -227,6 +238,9 @@ describe('Chat Rooms & Messages API', () => {
             user1_id: TEST_USER_ID,
             user2_id: TEST_OTHER_USER_ID,
             other_user_id: TEST_OTHER_USER_ID,
+            type: 'dm',
+            group_name: null,
+            g_id: null,
             last_message_at: new Date(),
           },
         ],
@@ -254,6 +268,7 @@ describe('Chat Rooms & Messages API', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.chatRooms).toBeDefined();
       expect(Array.isArray(res.body.chatRooms)).toBe(true);
+      expect(res.body.chatRooms[0].type).toBe('dm');
     });
   });
 

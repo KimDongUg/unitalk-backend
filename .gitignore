@@ -20,6 +20,11 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.claude/
+
+# Misc
+nul
+uploads/
 
 # Build
 dist/

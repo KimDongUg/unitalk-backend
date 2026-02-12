@@ -19,7 +19,7 @@ const User = {
 
   async findById(id) {
     const result = await query(
-      `SELECT id, phone, name, profile_image_url, language_code, target_language, fcm_token, is_active, created_at, updated_at
+      `SELECT id, phone, name, profile_image_url, language_code, target_language, university_id, fcm_token, is_active, created_at, updated_at
        FROM users WHERE id = $1`,
       [id]
     );
@@ -82,6 +82,34 @@ const User = {
       `UPDATE users SET fcm_token = $1, updated_at = NOW() WHERE id = $2`,
       [fcmToken, id]
     );
+  },
+
+  async findByName(name) {
+    const result = await query(
+      `SELECT id, phone, name, profile_image_url, language_code, target_language, university_id, is_active, created_at, updated_at
+       FROM users WHERE name = $1`,
+      [name]
+    );
+    return result.rows[0] || null;
+  },
+
+  async findByNameWithPassword(name) {
+    const result = await query(
+      `SELECT id, phone, name, password, profile_image_url, language_code, target_language, university_id, fcm_token, is_active, created_at, updated_at
+       FROM users WHERE name = $1`,
+      [name]
+    );
+    return result.rows[0] || null;
+  },
+
+  async createWithPassword({ name, password, university_id, language_code, target_language }) {
+    const result = await query(
+      `INSERT INTO users (name, password, university_id, language_code, target_language, phone_hash)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, profile_image_url, language_code, target_language, university_id, created_at`,
+      [name, password, university_id, language_code || 'en', target_language || null, 'nickname_' + Date.now()]
+    );
+    return result.rows[0];
   },
 
   async findOrCreate(phone) {

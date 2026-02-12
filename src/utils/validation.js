@@ -54,15 +54,52 @@ const sendMessageSchema = Joi.object({
 });
 
 const createChatRoomSchema = Joi.object({
-  userId: Joi.string().uuid().required(),
-  otherUserId: Joi.string().uuid().required(),
-});
+  userId: Joi.string().uuid(),
+  otherUserId: Joi.string().uuid(),
+  groupId: Joi.string().uuid(),
+}).or('groupId', 'otherUserId');
 
 const sendChatMessageSchema = Joi.object({
   text: Joi.string().min(1).max(10000).required(),
   user: Joi.object({
     _id: Joi.string().uuid().required(),
   }).required(),
+  senderLang: Joi.string().min(2).max(10).required(),
+});
+
+const registerSchema = Joi.object({
+  nickname: Joi.string().min(2).max(100).required(),
+  password: Joi.string().min(6).max(100).required(),
+  universityId: Joi.string().uuid().required(),
+  viewLang: Joi.string().min(2).max(10).default('en'),
+  inputLang: Joi.string().min(2).max(10),
+});
+
+const loginSchema = Joi.object({
+  nickname: Joi.string().min(1).max(100).required(),
+  password: Joi.string().min(1).max(100).required(),
+});
+
+const universitySearchSchema = Joi.object({
+  search: Joi.string().max(200).allow(''),
+  country: Joi.string().max(10),
+});
+
+const groupListSchema = Joi.object({
+  universityId: Joi.string().uuid().required(),
+  category: Joi.string().max(50),
+});
+
+const createGroupSchema = Joi.object({
+  name: Joi.string().min(1).max(200).required(),
+  description: Joi.string().max(1000).allow(''),
+  universityId: Joi.string().uuid().required(),
+  category: Joi.string().max(50).default('general'),
+  isPublic: Joi.boolean().default(true),
+});
+
+const announcementSchema = Joi.object({
+  content: Joi.string().min(1).max(10000).required(),
   senderLang: Joi.string().min(2).max(10).required(),
 });
 
@@ -114,6 +151,12 @@ module.exports = {
   readMessagesSchema,
   paginationSchema,
   pageBasedPaginationSchema,
+  registerSchema,
+  loginSchema,
+  universitySearchSchema,
+  groupListSchema,
+  createGroupSchema,
+  announcementSchema,
   validate,
   validateQuery,
 };

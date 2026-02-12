@@ -1,6 +1,7 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const GroupMember = require('../models/GroupMember');
 const translationService = require('../services/translationService');
 const pushService = require('../services/pushService');
 const cacheService = require('../services/cacheService');
@@ -9,8 +10,24 @@ const logger = require('../utils/logger');
 const chatRoomController = {
   async createChatRoom(req, res, next) {
     try {
-      const { userId, otherUserId } = req.validatedBody;
+      const { userId, otherUserId, groupId } = req.validatedBody;
 
+      if (groupId) {
+        // Group chat room
+        const { conversation, isNew } = await Conversation.findOrCreateForGroup(groupId);
+        return res.json({
+          success: true,
+          chatRoom: {
+            id: conversation.id,
+            group_id: groupId,
+            type: 'group',
+            created_at: conversation.created_at,
+          },
+          isNew,
+        });
+      }
+
+      // 1:1 chat room
       const { conversation, isNew } = await Conversation.findOrCreate(userId, otherUserId);
 
       res.json({
@@ -19,6 +36,7 @@ const chatRoomController = {
           id: conversation.id,
           user1_id: conversation.user1_id,
           user2_id: conversation.user2_id,
+          type: 'dm',
           created_at: conversation.created_at,
         },
         isNew,
@@ -35,11 +53,22 @@ const chatRoomController = {
 
       const enriched = await Promise.all(
         conversations.map(async (conv) => {
+          if (conv.type === 'group') {
+            return {
+              id: conv.id,
+              type: 'group',
+              group_id: conv.g_id,
+              group_name: conv.group_name,
+              last_message_at: conv.last_message_at,
+            };
+          }
+
           const otherUser = await User.findById(conv.other_user_id);
           const unreadCount = await Message.getUnreadCount(conv.id, userId);
 
           return {
             id: conv.id,
+            type: 'dm',
             other_user: otherUser
               ? {
                   id: otherUser.id,
@@ -95,6 +124,7 @@ const chatRoomController = {
           original_text: msg.original_text,
           translated_text: translatedText,
           senderLang: msg.sender_language || msg.original_language,
+          is_announcement: msg.is_announcement || false,
           created_at: msg.created_at,
           read_at: msg.read_at,
         };
@@ -129,20 +159,31 @@ const chatRoomController = {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      // Determine recipient
-      const recipientId =
-        conversation.user1_id === senderId
-          ? conversation.user2_id
-          : conversation.user1_id;
-
-      const recipient = await User.findById(recipientId);
       const sender = await User.findById(senderId);
-
-      // Translate
       const translatedTexts = {};
-      if (recipient.language_code && recipient.language_code !== senderLang) {
-        translatedTexts[recipient.language_code] =
-          await translationService.translateText(text, recipient.language_code, senderLang);
+
+      if (conversation.group_id) {
+        // Group message: translate to all member languages
+        const languages = await GroupMember.getMemberLanguages(conversation.group_id);
+        const translationPromises = languages
+          .filter((lang) => lang !== senderLang)
+          .map(async (lang) => {
+            translatedTexts[lang] = await translationService.translateText(text, lang, senderLang);
+          });
+        await Promise.all(translationPromises);
+      } else {
+        // 1:1 message: translate to recipient language
+        const recipientId =
+          conversation.user1_id === senderId
+            ? conversation.user2_id
+            : conversation.user1_id;
+
+        const recipient = await User.findById(recipientId);
+
+        if (recipient.language_code && recipient.language_code !== senderLang) {
+          translatedTexts[recipient.language_code] =
+            await translationService.translateText(text, recipient.language_code, senderLang);
+        }
       }
 
       // Save to database
@@ -158,19 +199,42 @@ const chatRoomController = {
       // Update conversation last_message_at
       await Conversation.updateLastMessage(conversationId);
 
-      // Push notification if recipient is offline
-      const isOnline = await cacheService.exists(`online:${recipientId}`);
-      if (!isOnline && recipient.fcm_token) {
-        const recipientText = translatedTexts[recipient.language_code] || text;
-        await pushService.sendNotification(recipient.fcm_token, {
-          title: sender.name || 'New message',
-          body: recipientText,
-          data: {
-            conversation_id: conversationId,
-            sender_id: senderId,
+      if (conversation.group_id) {
+        // Group: broadcast via Socket.io
+        const io = req.app.get('io');
+        if (io) {
+          io.to(`room:${conversationId}`).emit('new_message', {
             message_id: message.id,
-          },
-        });
+            conversation_id: conversationId,
+            group_id: conversation.group_id,
+            sender_id: senderId,
+            sender_name: sender.name,
+            original_text: text,
+            translated_texts: translatedTexts,
+            created_at: message.created_at,
+          });
+        }
+      } else {
+        // 1:1: push notification
+        const recipientId =
+          conversation.user1_id === senderId
+            ? conversation.user2_id
+            : conversation.user1_id;
+        const recipient = await User.findById(recipientId);
+
+        const isOnline = await cacheService.exists(`online:${recipientId}`);
+        if (!isOnline && recipient.fcm_token) {
+          const recipientText = translatedTexts[recipient.language_code] || text;
+          await pushService.sendNotification(recipient.fcm_token, {
+            title: sender.name || 'New message',
+            body: recipientText,
+            data: {
+              conversation_id: conversationId,
+              sender_id: senderId,
+              message_id: message.id,
+            },
+          });
+        }
       }
 
       logger.info(`Message sent in chatroom ${conversationId}`);

@@ -3,6 +3,8 @@ const config = require('../config/env');
 const User = require('../models/User');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const Group = require('../models/Group');
+const GroupMember = require('../models/GroupMember');
 const translationService = require('../services/translationService');
 const pushService = require('../services/pushService');
 const cacheService = require('../services/cacheService');
@@ -31,6 +33,15 @@ function setupSocket(io) {
         // Store online status in Redis
         await cacheService.setRaw(`online:${user.id}`, Date.now().toString());
 
+        // Auto-join all group chat rooms
+        const groups = await Group.findByUserId(user.id);
+        for (const group of groups) {
+          const conv = await Conversation.findByGroupId(group.id);
+          if (conv) {
+            socket.join(`room:${conv.id}`);
+          }
+        }
+
         // Notify friends about online status
         const friends = await getUserFriends(user.id);
         for (const friend of friends) {
@@ -49,7 +60,36 @@ function setupSocket(io) {
       }
     });
 
-    // 2. Send message
+    // 2. Join room
+    socket.on('join_room', async ({ conversation_id }) => {
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Not authenticated' });
+        return;
+      }
+
+      try {
+        const isParticipant = await Conversation.isParticipant(conversation_id, socket.userId);
+        if (!isParticipant) {
+          socket.emit('error', { message: 'Access denied' });
+          return;
+        }
+
+        socket.join(`room:${conversation_id}`);
+        socket.emit('room_joined', { conversation_id });
+      } catch (error) {
+        logger.error('Join room error:', error);
+        socket.emit('error', { message: error.message });
+      }
+    });
+
+    // 3. Leave room
+    socket.on('leave_room', ({ conversation_id }) => {
+      if (!socket.userId) return;
+      socket.leave(`room:${conversation_id}`);
+      socket.emit('room_left', { conversation_id });
+    });
+
+    // 4. Send message
     socket.on('send_message', async (data) => {
       if (!socket.userId) {
         socket.emit('error', { message: 'Not authenticated' });
@@ -75,32 +115,41 @@ function setupSocket(io) {
           return;
         }
 
-        // Determine recipient
-        const recipientId =
-          conversation.user1_id === socket.userId
-            ? conversation.user2_id
-            : conversation.user1_id;
-
-        const recipient = await User.findById(recipientId);
         const sender = await User.findById(socket.userId);
-
-        // Detect source language and translate
         const detectedLang = await translationService.detectLanguage(text);
         const translatedTexts = {};
 
-        if (recipient.language_code && recipient.language_code !== detectedLang) {
-          translatedTexts[recipient.language_code] =
-            await translationService.translateText(text, recipient.language_code, detectedLang);
-        }
+        if (conversation.group_id) {
+          // Group message: translate to all member languages
+          const languages = await GroupMember.getMemberLanguages(conversation.group_id);
+          const translationPromises = languages
+            .filter((lang) => lang !== detectedLang)
+            .map(async (lang) => {
+              translatedTexts[lang] = await translationService.translateText(text, lang, detectedLang);
+            });
+          await Promise.all(translationPromises);
+        } else {
+          // 1:1 message
+          const recipientId =
+            conversation.user1_id === socket.userId
+              ? conversation.user2_id
+              : conversation.user1_id;
 
-        // Also translate to sender's language if different
-        if (
-          sender.language_code &&
-          sender.language_code !== detectedLang &&
-          sender.language_code !== recipient.language_code
-        ) {
-          translatedTexts[sender.language_code] =
-            await translationService.translateText(text, sender.language_code, detectedLang);
+          const recipient = await User.findById(recipientId);
+
+          if (recipient.language_code && recipient.language_code !== detectedLang) {
+            translatedTexts[recipient.language_code] =
+              await translationService.translateText(text, recipient.language_code, detectedLang);
+          }
+
+          if (
+            sender.language_code &&
+            sender.language_code !== detectedLang &&
+            sender.language_code !== recipient.language_code
+          ) {
+            translatedTexts[sender.language_code] =
+              await translationService.translateText(text, sender.language_code, detectedLang);
+          }
         }
 
         // Save to database
@@ -122,32 +171,73 @@ function setupSocket(io) {
           created_at: message.created_at,
         });
 
-        // Send to recipient
-        const recipientText =
-          translatedTexts[recipient.language_code] || text;
-
-        io.to(`user:${recipientId}`).emit('new_message', {
-          message_id: message.id,
-          conversation_id,
-          sender_id: socket.userId,
-          sender_name: sender.name,
-          text: recipientText,
-          original_text: text,
-          created_at: message.created_at,
-        });
-
-        // Push notification if recipient is offline
-        const isOnline = await cacheService.exists(`online:${recipientId}`);
-        if (!isOnline && recipient.fcm_token) {
-          await pushService.sendNotification(recipient.fcm_token, {
-            title: sender.name || 'New message',
-            body: recipientText,
-            data: {
-              conversation_id,
-              sender_id: socket.userId,
-              message_id: message.id,
-            },
+        if (conversation.group_id) {
+          // Group: broadcast to room
+          io.to(`room:${conversation_id}`).emit('new_message', {
+            message_id: message.id,
+            conversation_id,
+            group_id: conversation.group_id,
+            sender_id: socket.userId,
+            sender_name: sender.name,
+            text,
+            original_text: text,
+            translated_texts: translatedTexts,
+            created_at: message.created_at,
           });
+
+          // Push notifications to offline group members
+          const members = await GroupMember.getMembers(conversation.group_id);
+          for (const member of members) {
+            if (member.id === socket.userId) continue;
+            const isOnline = await cacheService.exists(`online:${member.id}`);
+            if (!isOnline && member.fcm_token) {
+              const memberText = translatedTexts[member.language_code] || text;
+              await pushService.sendNotification(member.fcm_token, {
+                title: `${sender.name} in group`,
+                body: memberText,
+                data: {
+                  conversation_id,
+                  group_id: conversation.group_id,
+                  sender_id: socket.userId,
+                  message_id: message.id,
+                },
+              });
+            }
+          }
+        } else {
+          // 1:1: send to recipient
+          const recipientId =
+            conversation.user1_id === socket.userId
+              ? conversation.user2_id
+              : conversation.user1_id;
+          const recipient = await User.findById(recipientId);
+
+          const recipientText =
+            translatedTexts[recipient.language_code] || text;
+
+          io.to(`user:${recipientId}`).emit('new_message', {
+            message_id: message.id,
+            conversation_id,
+            sender_id: socket.userId,
+            sender_name: sender.name,
+            text: recipientText,
+            original_text: text,
+            created_at: message.created_at,
+          });
+
+          // Push notification if recipient is offline
+          const isOnline = await cacheService.exists(`online:${recipientId}`);
+          if (!isOnline && recipient.fcm_token) {
+            await pushService.sendNotification(recipient.fcm_token, {
+              title: sender.name || 'New message',
+              body: recipientText,
+              data: {
+                conversation_id,
+                sender_id: socket.userId,
+                message_id: message.id,
+              },
+            });
+          }
         }
 
         logger.info(`Message sent in conversation ${conversation_id}`);
@@ -157,28 +247,41 @@ function setupSocket(io) {
       }
     });
 
-    // 3. Typing indicator
+    // 5. Typing indicator
     socket.on('typing', async ({ conversation_id, is_typing }) => {
       if (!socket.userId) return;
 
       try {
-        const recipientId = await Conversation.getOtherUserId(
-          conversation_id,
-          socket.userId
-        );
-        if (recipientId) {
-          io.to(`user:${recipientId}`).emit('typing', {
+        const conversation = await Conversation.findById(conversation_id);
+        if (!conversation) return;
+
+        if (conversation.group_id) {
+          // Group: broadcast to room
+          socket.to(`room:${conversation_id}`).emit('typing', {
             conversation_id,
             user_id: socket.userId,
             is_typing,
           });
+        } else {
+          // 1:1: send to other user
+          const recipientId = await Conversation.getOtherUserId(
+            conversation_id,
+            socket.userId
+          );
+          if (recipientId) {
+            io.to(`user:${recipientId}`).emit('typing', {
+              conversation_id,
+              user_id: socket.userId,
+              is_typing,
+            });
+          }
         }
       } catch (error) {
         logger.error('Typing event error:', error);
       }
     });
 
-    // 4. Mark messages as read
+    // 6. Mark messages as read
     socket.on('mark_read', async ({ message_ids }) => {
       if (!socket.userId) return;
 
@@ -205,7 +308,7 @@ function setupSocket(io) {
       }
     });
 
-    // 5. Start conversation
+    // 7. Start conversation
     socket.on('start_conversation', async ({ user_id }) => {
       if (!socket.userId) return;
 
@@ -221,7 +324,7 @@ function setupSocket(io) {
       }
     });
 
-    // 6. Disconnect
+    // 8. Disconnect
     socket.on('disconnect', async () => {
       if (socket.userId) {
         // Remove online status

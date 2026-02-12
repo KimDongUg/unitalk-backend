@@ -1,5 +1,6 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 // Setup mocks before requiring app
 require('./setup');
@@ -8,9 +9,140 @@ const { query } = require('../src/config/database');
 const { redisClient } = require('../src/config/redis');
 const { app } = require('../src/app');
 
+const TEST_UNIVERSITY_ID = '880e8400-e29b-41d4-a716-446655440000';
+
 describe('Authentication', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('POST /auth/register', () => {
+    test('should register a new user with nickname and password', async () => {
+      // Mock findByName - not found (nickname available)
+      query.mockResolvedValueOnce({ rows: [] });
+      // Mock createWithPassword
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: '550e8400-e29b-41d4-a716-446655440099',
+            name: 'TestUser',
+            language_code: 'ko',
+            target_language: 'en',
+            university_id: TEST_UNIVERSITY_ID,
+            created_at: new Date(),
+          },
+        ],
+      });
+      // Mock joinDefaultGroups
+      query.mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(app)
+        .post('/auth/register')
+        .send({
+          nickname: 'TestUser',
+          password: 'password123',
+          universityId: TEST_UNIVERSITY_ID,
+          viewLang: 'ko',
+          inputLang: 'en',
+        });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.token).toBeDefined();
+      expect(res.body.user.nickname).toBe('TestUser');
+      expect(res.body.user.universityId).toBe(TEST_UNIVERSITY_ID);
+    });
+
+    test('should reject duplicate nickname', async () => {
+      // Mock findByName - found (nickname taken)
+      query.mockResolvedValueOnce({
+        rows: [{ id: 'existing-id', name: 'TestUser' }],
+      });
+
+      const res = await request(app)
+        .post('/auth/register')
+        .send({
+          nickname: 'TestUser',
+          password: 'password123',
+          universityId: TEST_UNIVERSITY_ID,
+        });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body.error).toBe('Nickname already taken');
+    });
+
+    test('should reject short password', async () => {
+      const res = await request(app)
+        .post('/auth/register')
+        .send({
+          nickname: 'TestUser',
+          password: '123',
+          universityId: TEST_UNIVERSITY_ID,
+        });
+
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('POST /auth/login', () => {
+    test('should login with valid credentials', async () => {
+      const hashedPassword = await bcrypt.hash('password123', 12);
+
+      // Mock findByNameWithPassword
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: '550e8400-e29b-41d4-a716-446655440099',
+            name: 'TestUser',
+            password: hashedPassword,
+            language_code: 'ko',
+            target_language: 'en',
+            university_id: TEST_UNIVERSITY_ID,
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .post('/auth/login')
+        .send({ nickname: 'TestUser', password: 'password123' });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.token).toBeDefined();
+      expect(res.body.user.nickname).toBe('TestUser');
+    });
+
+    test('should reject invalid password', async () => {
+      const hashedPassword = await bcrypt.hash('password123', 12);
+
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: '550e8400-e29b-41d4-a716-446655440099',
+            name: 'TestUser',
+            password: hashedPassword,
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .post('/auth/login')
+        .send({ nickname: 'TestUser', password: 'wrongpassword' });
+
+      expect(res.statusCode).toBe(401);
+      expect(res.body.error).toBe('Invalid nickname or password');
+    });
+
+    test('should reject non-existent user', async () => {
+      query.mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(app)
+        .post('/auth/login')
+        .send({ nickname: 'NonExistent', password: 'password123' });
+
+      expect(res.statusCode).toBe(401);
+      expect(res.body.error).toBe('Invalid nickname or password');
+    });
   });
 
   describe('POST /auth/otp/send', () => {

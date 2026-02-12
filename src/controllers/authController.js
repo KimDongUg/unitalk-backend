@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const config = require('../config/env');
 const User = require('../models/User');
+const GroupMember = require('../models/GroupMember');
 const smsService = require('../services/smsService');
 const cacheService = require('../services/cacheService');
 const logger = require('../utils/logger');
@@ -9,6 +11,96 @@ const OTP_TTL = 300; // 5 minutes
 const TEST_OTP = '123456';
 
 const authController = {
+  async register(req, res, next) {
+    try {
+      const { nickname, password, universityId, viewLang, inputLang } = req.validatedBody;
+
+      // Check nickname uniqueness
+      const existing = await User.findByName(nickname);
+      if (existing) {
+        return res.status(409).json({ error: 'Nickname already taken' });
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      // Create user
+      const user = await User.createWithPassword({
+        name: nickname,
+        password: hashedPassword,
+        university_id: universityId,
+        language_code: viewLang,
+        target_language: inputLang,
+      });
+
+      // Auto-join default groups
+      await GroupMember.joinDefaultGroups(user.id, universityId);
+
+      // Generate JWT
+      const token = jwt.sign(
+        { id: user.id, nickname: user.name, universityId: user.university_id },
+        config.jwt.secret,
+        { expiresIn: config.jwt.expiresIn }
+      );
+
+      logger.info(`User registered: ${user.id}`);
+      res.status(201).json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          nickname: user.name,
+          universityId: user.university_id,
+          viewLang: user.language_code,
+          inputLang: user.target_language,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async login(req, res, next) {
+    try {
+      const { nickname, password } = req.validatedBody;
+
+      const user = await User.findByNameWithPassword(nickname);
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid nickname or password' });
+      }
+
+      if (!user.password) {
+        return res.status(401).json({ error: 'Invalid nickname or password' });
+      }
+
+      const isValid = await bcrypt.compare(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid nickname or password' });
+      }
+
+      const token = jwt.sign(
+        { id: user.id, nickname: user.name, universityId: user.university_id },
+        config.jwt.secret,
+        { expiresIn: config.jwt.expiresIn }
+      );
+
+      logger.info(`User logged in: ${user.id}`);
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          nickname: user.name,
+          universityId: user.university_id,
+          viewLang: user.language_code,
+          inputLang: user.target_language,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async sendOtp(req, res, next) {
     try {
       const { phone } = req.validatedBody;
