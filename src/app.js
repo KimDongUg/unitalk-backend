@@ -112,6 +112,7 @@ async function start() {
       logger.info(`UniTalk server running on port ${port} [${config.nodeEnv}]`);
     });
   } catch (error) {
+    console.error('Failed to start server:', error);
     logger.error('Failed to start server:', error);
     process.exit(1);
   }
