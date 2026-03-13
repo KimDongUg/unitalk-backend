@@ -19,6 +19,12 @@ const messageRoutes = require('./routes/messages');
 const chatRoomRoutes = require('./routes/chatrooms');
 const universityRoutes = require('./routes/universities');
 const groupRoutes = require('./routes/groups');
+const profileRoutes = require('./routes/profiles');
+const likeRoutes = require('./routes/likes');
+const reportRoutes = require('./routes/reports');
+const adminRoutes = require('./routes/admin');
+const matchRoutes = require('./routes/matches');
+const blockRoutes = require('./routes/blocks');
 
 const app = express();
 const server = http.createServer(app);
@@ -67,6 +73,15 @@ app.use('/chatrooms', chatRoomRoutes);
 app.use('/api/universities', universityRoutes);
 app.use('/api/groups', groupRoutes);
 
+// PRD endpoints: profiles, likes/matches, reports/blocks, admin
+app.use('/profiles', profileRoutes);
+app.use('/profile', profileRoutes);
+app.use('/like', likeRoutes);
+app.use('/matches', matchRoutes);
+app.use('/report', reportRoutes);
+app.use('/block', blockRoutes);
+app.use('/admin', adminRoutes);
+
 // Legacy API routes (backward compatibility)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -86,9 +101,11 @@ async function start() {
     await pool.query('SELECT 1');
     logger.info('PostgreSQL connection verified');
 
-    // Connect Redis
+    // Connect Redis (optional)
     await connectRedis();
-    logger.info('Redis connection verified');
+    if (require('./config/redis').redisEnabled) {
+      logger.info('Redis connection verified');
+    }
 
     const port = config.port;
     server.listen(port, () => {

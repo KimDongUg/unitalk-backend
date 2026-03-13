@@ -1,8 +1,9 @@
-const { redisClient } = require('../config/redis');
+const { redisClient, redisEnabled } = require('../config/redis');
 const logger = require('../utils/logger');
 
 const cacheService = {
   async get(key) {
+    if (!redisEnabled) return null;
     try {
       const value = await redisClient.get(key);
       return value ? JSON.parse(value) : null;
@@ -13,6 +14,7 @@ const cacheService = {
   },
 
   async set(key, value, ttlSeconds) {
+    if (!redisEnabled) return;
     try {
       const serialized = JSON.stringify(value);
       if (ttlSeconds) {
@@ -26,6 +28,7 @@ const cacheService = {
   },
 
   async del(key) {
+    if (!redisEnabled) return;
     try {
       await redisClient.del(key);
     } catch (error) {
@@ -34,6 +37,7 @@ const cacheService = {
   },
 
   async exists(key) {
+    if (!redisEnabled) return false;
     try {
       return await redisClient.exists(key);
     } catch (error) {
@@ -43,6 +47,7 @@ const cacheService = {
   },
 
   async setRaw(key, value, ttlSeconds) {
+    if (!redisEnabled) return;
     try {
       if (ttlSeconds) {
         await redisClient.set(key, value, { EX: ttlSeconds });
@@ -55,6 +60,7 @@ const cacheService = {
   },
 
   async getRaw(key) {
+    if (!redisEnabled) return null;
     try {
       return await redisClient.get(key);
     } catch (error) {
