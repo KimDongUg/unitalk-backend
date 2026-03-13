@@ -299,6 +299,77 @@ const migrations = [
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS source_device VARCHAR(10) DEFAULT 'mobile';
     `,
   },
+  {
+    name: '019_add_profile_fields_to_users',
+    sql: `
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(10);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(50);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_users_country ON users(country);
+      CREATE INDEX IF NOT EXISTS idx_users_gender ON users(gender);
+    `,
+  },
+  {
+    name: '020_create_likes',
+    sql: `
+      CREATE TABLE IF NOT EXISTS likes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        liker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        liked_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(liker_id, liked_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_likes_liker ON likes(liker_id);
+      CREATE INDEX IF NOT EXISTS idx_likes_liked ON likes(liked_id);
+    `,
+  },
+  {
+    name: '021_create_matches',
+    sql: `
+      CREATE TABLE IF NOT EXISTS matches (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user1_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user2_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        matched_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user1_id, user2_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_matches_user1 ON matches(user1_id);
+      CREATE INDEX IF NOT EXISTS idx_matches_user2 ON matches(user2_id);
+    `,
+  },
+  {
+    name: '022_create_reports',
+    sql: `
+      CREATE TABLE IF NOT EXISTS reports (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        reported_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        reason TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_id);
+      CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+    `,
+  },
+  {
+    name: '023_create_blocks',
+    sql: `
+      CREATE TABLE IF NOT EXISTS blocks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        blocker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        blocked_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(blocker_id, blocked_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
+      CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks(blocked_id);
+    `,
+  },
 ];
 
 async function migrate() {

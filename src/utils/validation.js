@@ -148,6 +148,49 @@ const validateQuery = (schema) => (req, res, next) => {
   next();
 };
 
+// PRD: Like / Match
+const likeSchema = Joi.object({
+  liked_id: Joi.string().uuid().required(),
+});
+
+// PRD: Report
+const reportSchema = Joi.object({
+  reported_id: Joi.string().uuid().required(),
+  reason: Joi.string().max(1000).allow(''),
+});
+
+// PRD: Block
+const blockSchema = Joi.object({
+  blocked_id: Joi.string().uuid().required(),
+});
+
+// PRD: Admin ban
+const banSchema = Joi.object({
+  user_id: Joi.string().uuid().required(),
+  action: Joi.string().valid('ban', 'unban').required(),
+});
+
+// PRD: Profile create/update
+const profileCreateSchema = Joi.object({
+  nickname: Joi.string().min(1).max(50),
+  gender: Joi.string().valid('male', 'female', 'other').allow(''),
+  country: Joi.string().max(50).allow(''),
+  language: Joi.string().max(50).allow(''),
+  bio: Joi.string().max(500).allow(''),
+  profile_image: Joi.string().uri().allow(''),
+  birth_date: Joi.date().iso().allow(null),
+});
+
+const profileUpdateSchema = Joi.object({
+  nickname: Joi.string().min(1).max(50),
+  gender: Joi.string().valid('male', 'female', 'other').allow(''),
+  country: Joi.string().max(50).allow(''),
+  language: Joi.string().max(50).allow(''),
+  bio: Joi.string().max(500).allow(''),
+  profile_image: Joi.string().uri().allow(''),
+  birth_date: Joi.date().iso().allow(null),
+}).min(1);
+
 module.exports = {
   sendOtpSchema,
   verifyOtpSchema,
@@ -170,6 +213,12 @@ module.exports = {
   announcementSchema,
   loginWithDeviceSchema,
   qrVerifySchema,
+  likeSchema,
+  reportSchema,
+  blockSchema,
+  banSchema,
+  profileCreateSchema,
+  profileUpdateSchema,
   validate,
   validateQuery,
 };
